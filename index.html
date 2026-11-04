@@ -77,6 +77,8 @@ form input,form select{display:block;width:100%;height:48px;margin-top:4px;paddi
 .leg b{width:58px;text-align:right}
 .leg .la{width:96px;text-align:right;color:var(--mute);font-size:.9rem}
 .row .l b{display:flex;align-items:center}
+#update{position:fixed;left:12px;right:12px;bottom:calc(var(--nav-h) + env(safe-area-inset-bottom) + 12px);z-index:25;display:flex;justify-content:space-between;align-items:center;gap:10px;background:var(--card);border:1px solid var(--acc);border-radius:16px;padding:10px 14px}
+#update[hidden]{display:none}
 #toast{position:fixed;left:50%;bottom:calc(var(--nav-h) + 24px);transform:translateX(-50%);background:#222;color:#fff;padding:10px 16px;border-radius:99px;font-size:.9rem;z-index:30;opacity:0;pointer-events:none;transition:opacity .2s;max-width:90vw;text-align:center}
 #toast.show{opacity:1}
 </style>
@@ -91,6 +93,7 @@ form input,form select{display:block;width:100%;height:48px;margin-top:4px;paddi
   <button data-a="tab" data-t="settings"><svg viewBox="0 0 24 24"><path d="M4 6h10M18 6h2M4 12h2M10 12h10M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="8" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg>Settings</button>
 </nav>
 <div id="sheet" data-a="backdrop"><div id="sheet-body"></div></div>
+<div id="update" hidden><span>A new version is ready</span><button class="btn pri sm" data-a="reload">Reload</button></div>
 <div id="toast"></div>
 
 <script>
@@ -113,15 +116,16 @@ function fmt(n, cur) {
 
 /* ---------- state ---------- */
 const KEY = 'budget-v2';
-const DEF = () => ({spendCur: 'ZAR', age: 0, rates: null, lastBackup: null, created: Date.now(), jobs: [], expenses: []});
+const DEF = () => ({spendCur: 'ZAR', age: 0, med: 0, ra: 0, save: 0, haircut: 0, rates: null, lastBackup: null, created: Date.now(), jobs: [], expenses: []});
 function load() { try { return Object.assign(DEF(), JSON.parse(localStorage.getItem(KEY)) || {}); } catch { return DEF(); } }
 function save() { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch { toast('Could not save – storage is full or blocked'); } }
 /* Mock data: only ever loaded when the page is served from localhost, never on the live site. */
 const IS_LOCAL = location.protocol === 'file:' || ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
 const mockData = () => Object.assign(DEF(), {
+  med: 2, ra: 1500, save: 1000, haircut: 5,
   jobs: [
-    {id: 'mock-job1', name: 'Freelance', cur: 'USD', type: 'hourly', rate: 25, hours: 30},
-    {id: 'mock-job2', name: 'Retainer', cur: 'USD', type: 'monthly', rate: 800, hours: 0}
+    {id: 'mock-job1', name: 'Freelance', cur: 'USD', type: 'hourly', rate: 25, hours: 30, payroll: false},
+    {id: 'mock-job2', name: 'Retainer', cur: 'USD', type: 'monthly', rate: 800, hours: 0, payroll: true}
   ],
   expenses: [
     {id: 'mock-exp1', name: 'Rent', amt: 6000, cur: 'ZAR', freq: 'monthly', cat: 'Rent'},
@@ -197,17 +201,18 @@ function breakdown(parts, base) {                 // coloured bar + legend, perc
     ps.map(p => `<div class="leg">${dot(p.c)}<span class="ln">${esc(p.n)}</span><b>${(p.v / base * 100).toFixed(1)}%</b><span class="la">${fmt(p.v)}</span></div>`).join('');
 }
 const catParts = byCat => CATS.map(c => ({n: c.n, c: c.c, v: byCat[c.n] || 0})).sort((a, b) => b.v - a.v);
-function jobGross(j) {                       // gross per month, in the job's currency
-  if (j.type === 'hourly') return j.rate * j.hours * WEEKS;
+function jobGross(j, ov = {}) {              // gross per month, in the job's currency (ov = what-if hours per job)
+  if (j.type === 'hourly') return j.rate * (ov[j.id] ?? j.hours) * WEEKS;
   if (j.type === 'weekly') return j.rate * WEEKS;
   return j.rate;
 }
 
 /* South African income tax (SARS). Keyed by the year the tax year STARTS (1 March).
-   brackets: [taxable income above, base tax, rate]; rebate: [primary, secondary 65+, tertiary 75+] */
+   brackets: [taxable income above, base tax, rate]; rebate: [primary, secondary 65+, tertiary 75+]
+   med: monthly medical scheme fees credit [main member, first dependant, each further dependant] */
 const SA_TAX = {
-  2025: {label: '2025/26', rebate: [17235, 9444, 3145], brackets: [[0, 0, .18], [237100, 42678, .26], [370500, 77362, .31], [512800, 121475, .36], [673000, 179147, .39], [857900, 251258, .41], [1817000, 644489, .45]]},
-  2026: {label: '2026/27', rebate: [17820, 9765, 3249], brackets: [[0, 0, .18], [245100, 44118, .26], [383100, 79998, .31], [530200, 125599, .36], [695800, 185215, .39], [887000, 259783, .41], [1878600, 666339, .45]]}
+  2025: {label: '2025/26', rebate: [17235, 9444, 3145], med: [364, 364, 246], brackets: [[0, 0, .18], [237100, 42678, .26], [370500, 77362, .31], [512800, 121475, .36], [673000, 179147, .39], [857900, 251258, .41], [1817000, 644489, .45]]},
+  2026: {label: '2026/27', rebate: [17820, 9765, 3249], med: [376, 376, 254], brackets: [[0, 0, .18], [245100, 44118, .26], [383100, 79998, .31], [530200, 125599, .36], [695800, 185215, .39], [887000, 259783, .41], [1878600, 666339, .45]]}
 };
 function saTable(date = new Date()) {                       // auto-pick the tax year from today's date
   const start = date.getMonth() >= 2 ? date.getFullYear() : date.getFullYear() - 1;
@@ -215,22 +220,29 @@ function saTable(date = new Date()) {                       // auto-pick the tax
   const k = keys.filter(x => x <= start).pop() ?? keys[0];  // newest table we have, if the year is newer
   return SA_TAX[k];
 }
-function saTax(annual, age) {                                // annual tax in ZAR after rebates
+function saTax(annual, age, medAnnual = 0) {                 // annual tax in ZAR after rebates and medical credits
   const t = saTable();
   let b = t.brackets[0];
   for (const x of t.brackets) if (annual > x[0]) b = x;
   const tax = b[1] + Math.max(0, annual - b[0]) * b[2];
   const rebate = t.rebate[0] + (age >= 65 ? t.rebate[1] : 0) + (age >= 75 ? t.rebate[2] : 0);
-  return Math.max(0, tax - rebate);
+  return Math.max(0, tax - rebate - medAnnual);
 }
+function medCredit(n) {                                      // monthly credit for n people on the medical aid
+  const m = saTable().med;
+  return (n >= 1 ? m[0] : 0) + (n >= 2 ? m[1] : 0) + (n > 2 ? m[2] * (n - 2) : 0);
+}
+const UIF_CAP = 177.12;                                      // 1% of the R17,712 monthly earnings ceiling
+const RA_PCT = 0.275, RA_CAP = 350000;                       // retirement annuity deduction limits
 
-function stats() {
+function stats(ov = {}) {
   missing = false;
+  const hc = 1 - (+S.haircut || 0) / 100;                    // cautious rate: foreign income converts at a rate this much worse
+  const cv = (a, cur, to) => { const v = conv(a, cur, to); if (v === null) { missing = true; return 0; } return cur === to ? v : v * hc; };
+  const zs = z => { const v = conv(z, 'ZAR', S.spendCur); if (v === null) { missing = true; return 0; } return v; };
   const jobs = S.jobs.map(j => {
-    const g = jobGross(j);
-    const z = conv(g, j.cur, 'ZAR');
-    if (z === null) missing = true;
-    return {j, g, gs: toSpend(g, j.cur), gz: z ?? 0};
+    const g = jobGross(j, ov);
+    return {j, g, gz: cv(g, j.cur, 'ZAR'), gs: cv(g, j.cur, S.spendCur)};
   });
   const exps = S.expenses.map(x => {
     const m = x.amt * FREQ[x.freq];
@@ -238,14 +250,20 @@ function stats() {
   });
   const gross = jobs.reduce((s, a) => s + a.gs, 0);
   const grossZ = jobs.reduce((s, a) => s + a.gz, 0);
-  const taxZ = saTax(grossZ * 12, +S.age) / 12;             // tax is worked out on ALL jobs combined
-  let tax = conv(taxZ, 'ZAR', S.spendCur);
-  if (tax === null) { missing = true; tax = 0; }
-  const inc = gross - tax;
+  const annual = grossZ * 12;
+  const raDeduct = Math.min((+S.ra || 0) * 12, RA_PCT * annual, RA_CAP);        // tax-deductible part of the RA
+  const taxZ = saTax(annual - raDeduct, +S.age, medCredit(+S.med || 0) * 12) / 12;   // tax is worked out on ALL jobs combined
+  const selfZ = jobs.filter(a => !a.j.payroll).reduce((s, a) => s + a.gz, 0);
+  const uifZ = jobs.filter(a => a.j.payroll).reduce((s, a) => s + Math.min(a.gz * 0.01, UIF_CAP), 0);
+  const tax = zs(taxZ), uif = zs(uifZ), ra = zs(+S.ra || 0);
+  const taxSelf = grossZ > 0 ? tax * selfZ / grossZ : 0;     // share of the tax nobody deducts for you
+  const saved = +S.save || 0;
+  const inc = gross - tax - uif;
   const spend = exps.reduce((s, a) => s + a.ms, 0);
   const byCat = {};
   exps.forEach(a => { const c = catOf(a.x); byCat[c] = (byCat[c] || 0) + a.ms; });
-  return {jobs, exps, byCat, gross, tax, rate: gross > 0 ? tax / gross * 100 : 0, inc, spend, left: inc - spend, missing, year: saTable().label};
+  return {jobs, exps, byCat, gross, tax, uif, ra, saved, taxSelf, rate: gross > 0 ? tax / gross * 100 : 0,
+    inc, spend, left: inc - spend - ra - saved, missing, year: saTable().label};
 }
 
 /* ---------- views ---------- */
@@ -253,7 +271,8 @@ const RATE_WARN = `<div class="warn">Some amounts can't be converted yet because
 
 function vHome() {
   const st = stats();
-  const pct = st.inc > 0 ? Math.min(100, st.spend / st.inc * 100) : (st.spend > 0 ? 100 : 0);
+  const out = st.spend + st.ra + st.saved;
+  const pct = st.inc > 0 ? Math.min(100, out / st.inc * 100) : (out > 0 ? 100 : 0);
   let h = st.missing ? RATE_WARN : '';
   if (S.jobs.length || S.expenses.length) {
     const days = (Date.now() - (S.lastBackup || S.created || Date.now())) / 864e5;
@@ -261,16 +280,20 @@ function vHome() {
   }
   h += `<section class="card hero"><div class="lbl">Left over each month</div>
     <div class="big ${st.left < 0 ? 'neg' : 'pos'}">${fmt(st.left)}</div>
-    <div class="bar ${st.spend > st.inc ? 'over' : ''}"><i style="width:${pct}%"></i></div>
+    <div class="bar ${out > st.inc ? 'over' : ''}"><i style="width:${pct}%"></i></div>
     <div class="two"><div><span>Income (after tax)</span><b>${fmt(st.inc)}</b></div><div><span>Expenses</span><b class="neg">${fmt(st.spend)}</b></div></div>
     <div class="kv" style="margin-top:12px"><span>Left over per year</span><b class="${st.left < 0 ? 'neg' : ''}">${fmt(st.left * 12)}</b></div>
     <div class="kv"><span>Income before tax</span><span>${fmt(st.gross)}</span></div>
-    <div class="kv"><span>Tax (SA ${st.year})</span><span>−${fmt(st.tax)}</span></div></section>`;
-  if (st.gross > 0 || st.spend > 0) {
-    const base = st.tax + st.spend + Math.max(st.left, 0);
+    <div class="kv"><span>Tax (SA ${st.year})</span><span>−${fmt(st.tax)}</span></div>
+    ${st.uif > 0 ? `<div class="kv"><span>UIF</span><span>−${fmt(st.uif)}</span></div>` : ''}
+    ${st.ra > 0 ? `<div class="kv"><span>Retirement annuity</span><span>−${fmt(st.ra)}</span></div>` : ''}
+    ${st.saved > 0 ? `<div class="kv"><span>Savings goal</span><span>−${fmt(st.saved)}</span></div>` : ''}</section>`;
+  if (st.gross > 0 || out > 0) {
+    const base = st.tax + st.uif + out + Math.max(st.left, 0);
     h += `<h3>Where your income goes</h3><section class="card"><div class="mute" style="font-size:.8rem">Share of your income before tax</div>` +
-      breakdown([{n: 'Tax', c: TAX_COLOR, v: st.tax}, ...catParts(st.byCat), {n: 'Left over', c: '#e8efed', v: Math.max(st.left, 0)}], base) +
-      (st.left < 0 ? `<div class="warn" style="margin-bottom:0">Your expenses are more than your income after tax.</div>` : '') + `</section>`;
+      breakdown([{n: 'Tax', c: TAX_COLOR, v: st.tax}, {n: 'UIF', c: '#8a94a6', v: st.uif}, {n: 'Retirement (RA)', c: '#6c7ae0', v: st.ra},
+        {n: 'Savings goal', c: '#e8c07a', v: st.saved}, ...catParts(st.byCat), {n: 'Left over', c: '#e8efed', v: Math.max(st.left, 0)}], base) +
+      (st.left < 0 ? `<div class="warn" style="margin-bottom:0">Your expenses, retirement and savings are more than your income after tax.</div>` : '') + `</section>`;
   }
   h += `<h3>Income</h3>`;
   if (!st.jobs.length) h += `<div class="empty">No income yet.<br><button class="btn pri sm" style="margin-top:10px" data-a="addJob">+ Add a job</button></div>`;
@@ -290,7 +313,10 @@ function vIncome() {
   h += `<section class="card hero"><div class="lbl">Income per month after tax · ${esc(S.spendCur)}</div><div class="big">${fmt(st.inc)}</div>
     <div class="kv"><span>Before tax</span><span>${fmt(st.gross)}</span></div>
     <div class="kv"><span>Tax (SA ${st.year})</span><span>−${fmt(st.tax)}</span></div>
+    ${st.uif > 0 ? `<div class="kv"><span>UIF</span><span>−${fmt(st.uif)}</span></div>` : ''}
     <div class="kv"><span>Average tax rate</span><span>${st.rate.toFixed(1)}%</span></div></section>`;
+  if (st.taxSelf > 0) h += `<section class="card"><b>Set aside for SARS: ${fmt(st.taxSelf)} a month</b>
+    <p class="mute" style="font-size:.85rem;margin:6px 0 0">Nobody deducts tax from jobs that aren't on a South African payroll, so you pay it yourself as provisional tax (due at the end of August and the end of February). If you earn freelance or foreign income, make sure you're registered as a provisional taxpayer with SARS.</p></section>`;
   if (!S.jobs.length) h += `<div class="empty">No jobs yet. Add one to count its income.</div>`;
   st.jobs.forEach(({j, g, gs}) => {
     const rateTxt = j.type === 'hourly' ? `${fmt(j.rate, j.cur)} / hour × ${+j.hours} hours / week` : `${fmt(j.rate, j.cur)} / ${j.type === 'weekly' ? 'week' : 'month'}`;
@@ -301,9 +327,11 @@ function vIncome() {
       <div class="actions"><button class="btn sm" data-a="editJob" data-id="${j.id}">Edit</button></div></section>`;
   });
   h += `<button class="btn pri block" data-a="addJob">+ Add job</button>
-    <p class="mute" style="font-size:.8rem">Tax is an estimate using SARS ${st.year} rates on all your jobs combined, with the age rebate from Settings. It leaves out UIF, medical credits, retirement contributions and other deductions.</p>`;
+    ${S.jobs.some(j => j.type === 'hourly') ? `<button class="btn block" style="margin-top:10px" data-a="whatif">What if I work different hours?</button>` : ''}
+    <p class="mute" style="font-size:.8rem">Tax is an estimate using SARS ${st.year} rates on all your jobs combined, with the age rebate, medical credits and retirement annuity from Settings. Other deductions aren't included.</p>`;
   const others = [...new Set(S.jobs.map(j => j.cur))].filter(c => c !== S.spendCur);
   if (others.length && S.rates) h += `<p class="mute" style="font-size:.8rem;text-align:center">` + others.map(c => `1 ${c} = ${fmt(conv(1, c, S.spendCur) ?? 0)}`).join(' · ') + `<br>Rates updated ${esc(S.rates.date)}</p>`;
+  if (+S.haircut > 0 && others.length) h += `<p class="mute" style="font-size:.8rem;text-align:center">Budgeting with a cautious rate: ${+S.haircut}% worse than today's.</p>`;
   return h;
 }
 
@@ -333,8 +361,21 @@ function vSettings() {
     <h3>South African tax</h3><section class="card">
     <form onsubmit="return false"><label>Your age (sets the tax rebate)
     <select data-c="age">${[[0, 'Under 65'], [65, '65 to 74'], [75, '75 or older']].map(([v, t]) => `<option value="${v}" ${+S.age === v ? 'selected' : ''}>${t}</option>`).join('')}</select></label></form>
+    <form onsubmit="return false"><label>People on your medical aid (gives a monthly tax credit)
+    <select data-c="med">${[0, 1, 2, 3, 4, 5, 6, 7].map(n => `<option value="${n}" ${+S.med === n ? 'selected' : ''}>${n === 0 ? 'No medical aid' : n === 1 ? 'Just me' : 'Me + ' + (n - 1)}</option>`).join('')}</select></label>
+    <label>Retirement annuity per month (rand)
+    <input type="number" inputmode="decimal" step="any" min="0" data-c="ra" value="${+S.ra || ''}" placeholder="0"></label></form>
+    <p class="mute" style="font-size:.85rem;margin:8px 0 0">An RA lowers your tax (up to 27.5% of income, max R350,000 a year) and counts as money you set aside.</p>
     <div class="kv" style="margin-top:10px"><span>Tax year in use</span><span>${saTable().label}</span></div>
     <p class="mute" style="font-size:.85rem;margin:6px 0 0">The tax year is picked automatically from today's date (it changes on 1 March). Your income is converted to rand and taxed on the combined total of all jobs.</p></section>
+    <h3>Saving</h3><section class="card">
+    <form onsubmit="return false"><label>Savings goal per month (${esc(S.spendCur)})
+    <input type="number" inputmode="decimal" step="any" min="0" data-c="save" value="${+S.save || ''}" placeholder="0"></label></form>
+    <p class="mute" style="font-size:.85rem;margin:8px 0 0">Comes off what's left over, so you see what you can spend after saving.</p></section>
+    <h3>Cautious exchange rate</h3><section class="card">
+    <form onsubmit="return false"><label>Convert foreign income at a rate that is
+    <select data-c="haircut">${[0, 5, 10, 15, 20].map(n => `<option value="${n}" ${+S.haircut === n ? 'selected' : ''}>${n === 0 ? 'the same as today' : n + '% worse than today'}</option>`).join('')}</select></label></form>
+    <p class="mute" style="font-size:.85rem;margin:8px 0 0">The rand can strengthen against the dollar. Budgeting on a weaker rate keeps a bad month from breaking your plan.</p></section>
     <h3>Exchange rates</h3><section class="card">
     <div class="kv"><span>Last updated</span><span>${r ? esc(r.date) : 'never'}</span></div>
     <div class="kv"><span>Source</span><span>${r ? esc(r.src) : '–'}</span></div>
@@ -364,7 +405,7 @@ const delBtn = (a, id) => `<button type="button" class="btn danger" data-a="${a}
 
 function jobSheet(j) {
   const isNew = !j;
-  j = j || {name: '', cur: 'USD', type: 'hourly', rate: '', hours: ''};
+  j = j || {name: '', cur: 'USD', type: 'hourly', rate: '', hours: '', payroll: false};
   const lbl = {hourly: 'Hourly rate (before tax)', weekly: 'Pay per week (before tax)', monthly: 'Pay per month (before tax)'};
   openSheet(`<h2>${isNew ? 'Add job' : 'Edit job'}</h2>
     <form id="jobf" data-id="${esc(j.id || '')}">
@@ -373,6 +414,8 @@ function jobSheet(j) {
     <label>Currency<select name="cur">${curOpts(j.cur)}</select></label></div>
     <label><span id="jlabel">${lbl[j.type]}</span><input name="rate" type="number" inputmode="decimal" step="any" min="0" required value="${esc(j.rate)}"></label>
     <label id="hrow" ${j.type === 'hourly' ? '' : 'hidden'}>Hours per week<input name="hours" type="number" inputmode="decimal" step="any" min="0" max="168" value="${esc(j.hours)}"></label>
+    <label>Who pays the tax?<select name="payroll"><option value="0" ${j.payroll ? '' : 'selected'}>Me (freelance or foreign employer)</option>
+    <option value="1" ${j.payroll ? 'selected' : ''}>A South African payroll (tax and UIF deducted)</option></select></label>
     <div class="actions"><button class="btn pri" style="flex:1">Save</button><button type="button" class="btn" data-a="close">Cancel</button>${isNew ? '' : delBtn('delJob', j.id)}</div></form>`);
   $('#jtype').addEventListener('change', e => {
     $('#jlabel').textContent = lbl[e.target.value];
@@ -393,6 +436,26 @@ function expSheet(x) {
     <div class="actions"><button class="btn pri" style="flex:1">Save</button><button type="button" class="btn" data-a="close">Cancel</button>${isNew ? '' : delBtn('delExp', x.id)}</div></form>`);
 }
 
+const readWhat = () => Object.fromEntries([...document.querySelectorAll('[data-wi]')].map(i => [i.dataset.wi, num(i.value)]));
+function whatIfSheet() {
+  const hj = S.jobs.filter(j => j.type === 'hourly');
+  openSheet(`<h2>What if…?</h2>
+    <p class="mute" style="margin-top:0;font-size:.9rem">Change the hours per week to see how your budget would change. Nothing is saved until you tap “Use these hours”.</p>
+    <form id="whatf">${hj.map(j => `<label>${esc(j.name)} · hours per week<input type="number" inputmode="decimal" step="any" min="0" max="168" data-wi="${j.id}" value="${+j.hours}"></label>`).join('')}</form>
+    <section class="card" id="wires"></section>
+    <div class="actions"><button type="button" class="btn pri" style="flex:1" data-a="applyWhat">Use these hours</button><button type="button" class="btn" data-a="close">Close</button></div>`);
+  const upd = () => {
+    const base = stats(), s = stats(readWhat()), d = s.left - base.left;
+    $('#wires').innerHTML = `<div class="mute" style="font-size:.85rem">Left over each month</div>
+      <div class="big ${s.left < 0 ? 'neg' : 'pos'}" style="margin-bottom:6px">${fmt(s.left)}</div>
+      <div class="kv"><span>Change</span><b class="${d < 0 ? 'neg' : 'pos'}">${d < 0 ? '−' : '+'}${fmt(Math.abs(d))}</b></div>
+      <div class="kv"><span>Income before tax</span><span>${fmt(s.gross)}</span></div>
+      <div class="kv"><span>Tax</span><span>−${fmt(s.tax)}</span></div>`;
+  };
+  $('#whatf').addEventListener('input', upd);
+  upd();
+}
+
 /* ---------- actions ---------- */
 function download(name, text) {
   const a = document.createElement('a');
@@ -408,6 +471,9 @@ const A = {
   addExp: () => expSheet(),
   editExp: d => expSheet(S.expenses.find(x => x.id === d.id)),
   delExp: d => { if (confirm('Delete this expense?')) { S.expenses = S.expenses.filter(x => x.id !== d.id); save(); closeSheet(); render(); } },
+  whatif: whatIfSheet,
+  applyWhat: () => { const ov = readWhat(); S.jobs.forEach(j => { if (ov[j.id] > 0) j.hours = ov[j.id]; }); save(); closeSheet(); render(); toast('Hours updated'); },
+  reload: () => location.reload(),
   close: closeSheet,
   backdrop: (d, e) => { if (e.target.id === 'sheet') closeSheet(); },
   rates: () => refreshRates(true),
@@ -427,7 +493,7 @@ document.addEventListener('submit', e => {
   const put = (list, rec) => { const i = list.findIndex(r => r.id === rec.id); if (i >= 0) list[i] = rec; else list.push(rec); };
   if (f.id === 'jobf') {
     const rec = {id: f.dataset.id || uid(), name: fd.name.trim(), cur: fd.cur, type: fd.type, rate: num(fd.rate),
-      hours: fd.type === 'hourly' ? num(fd.hours) : 0};
+      hours: fd.type === 'hourly' ? num(fd.hours) : 0, payroll: fd.payroll === '1'};
     if (rec.type === 'hourly' && !(rec.hours > 0)) return toast('Enter the hours per week');
     put(S.jobs, rec); save(); closeSheet(); render();
   } else if (f.id === 'expf') {
@@ -440,8 +506,8 @@ document.addEventListener('submit', e => {
 
 document.addEventListener('change', e => {
   const t = e.target;
-  if (t.dataset.c === 'age') {
-    S.age = +t.value; save(); render();
+  if (['age', 'med', 'ra', 'save', 'haircut'].includes(t.dataset.c)) {
+    S[t.dataset.c] = Math.max(0, num(t.value)); save(); render();
   } else if (t.dataset.c === 'spendCur') {
     S.spendCur = t.value; save(); render(); toast(`Now showing ${t.value}`);
   } else if (t.id === 'file' && t.files[0]) {
@@ -458,7 +524,11 @@ document.addEventListener('change', e => {
 render();
 refreshRates(false);
 if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
-if ('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('sw.js').catch(() => {});
+if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+  const hadWorker = !!navigator.serviceWorker.controller;          // false on the very first visit
+  navigator.serviceWorker.register('sw.js').catch(() => {});
+  navigator.serviceWorker.addEventListener('controllerchange', () => { if (hadWorker) $('#update').hidden = false; });
+}
 </script>
 </body>
 </html>
