@@ -69,6 +69,14 @@ nav svg{width:24px;height:24px;fill:none;stroke:currentColor;stroke-width:1.8;st
 form label{display:block;font-size:.8rem;color:var(--mute);margin:10px 0 0}
 form input,form select{display:block;width:100%;height:48px;margin-top:4px;padding:0 12px;border-radius:12px;border:1px solid var(--line);background:var(--card);font-size:16px}
 .inl{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.stack{display:flex;gap:2px;height:14px;border-radius:99px;overflow:hidden;margin:4px 0 10px}
+.stack i{display:block;height:100%;min-width:3px}
+.dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:8px;flex:none}
+.leg{display:flex;align-items:center;gap:8px;padding:5px 0;font-variant-numeric:tabular-nums}
+.leg .ln{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.leg b{width:58px;text-align:right}
+.leg .la{width:96px;text-align:right;color:var(--mute);font-size:.9rem}
+.row .l b{display:flex;align-items:center}
 #toast{position:fixed;left:50%;bottom:calc(var(--nav-h) + 24px);transform:translateX(-50%);background:#222;color:#fff;padding:10px 16px;border-radius:99px;font-size:.9rem;z-index:30;opacity:0;pointer-events:none;transition:opacity .2s;max-width:90vw;text-align:center}
 #toast.show{opacity:1}
 </style>
@@ -116,10 +124,14 @@ const mockData = () => Object.assign(DEF(), {
     {id: 'mock-job2', name: 'Retainer', cur: 'USD', type: 'monthly', rate: 800, hours: 0}
   ],
   expenses: [
-    {id: 'mock-exp1', name: 'Rent', amt: 6000, cur: 'ZAR', freq: 'monthly'},
-    {id: 'mock-exp2', name: 'Groceries', amt: 400, cur: 'ZAR', freq: 'weekly'},
-    {id: 'mock-exp3', name: 'Netflix', amt: 10, cur: 'USD', freq: 'monthly'},
-    {id: 'mock-exp4', name: 'Car insurance', amt: 14400, cur: 'ZAR', freq: 'yearly'}
+    {id: 'mock-exp1', name: 'Rent', amt: 6000, cur: 'ZAR', freq: 'monthly', cat: 'Rent'},
+    {id: 'mock-exp2', name: 'Groceries', amt: 400, cur: 'ZAR', freq: 'weekly', cat: 'Groceries'},
+    {id: 'mock-exp3', name: 'Netflix', amt: 10, cur: 'USD', freq: 'monthly', cat: 'Subscriptions'},
+    {id: 'mock-exp4', name: 'Car insurance', amt: 14400, cur: 'ZAR', freq: 'yearly', cat: 'Insurance'},
+    {id: 'mock-exp5', name: 'Electricity', amt: 1500, cur: 'ZAR', freq: 'monthly', cat: 'Utilities'},
+    {id: 'mock-exp6', name: 'Fibre internet', amt: 900, cur: 'ZAR', freq: 'monthly', cat: 'Utilities'},
+    {id: 'mock-exp7', name: 'Petrol', amt: 600, cur: 'ZAR', freq: 'weekly', cat: 'Transport'},
+    {id: 'mock-exp8', name: 'Gym', amt: 550, cur: 'ZAR', freq: 'monthly', cat: 'Health'}
   ]
 });
 let S = load();
@@ -170,6 +182,24 @@ async function refreshRates(force) {
 const WEEKS = 52 / 12;
 const FREQ = {weekly: WEEKS, monthly: 1, yearly: 1 / 12};
 const FREQ_LABEL = {weekly: 'week', monthly: 'month', yearly: 'year'};
+
+/* Expense categories and their colours */
+const CATS = [
+  {n: 'Rent', c: '#5b9bff'}, {n: 'Utilities', c: '#f5b942'}, {n: 'Subscriptions', c: '#b58cf5'},
+  {n: 'Groceries', c: '#4fd1a5'}, {n: 'Transport', c: '#f0794f'}, {n: 'Insurance', c: '#4ec3de'},
+  {n: 'Health', c: '#ef6f9a'}, {n: 'Eating out', c: '#d9d04a'}, {n: 'Fun', c: '#9ad14f'}, {n: 'Other', c: '#a8a08a'}
+];
+const CAT_COLOR = Object.fromEntries(CATS.map(c => [c.n, c.c]));
+const catOf = x => CAT_COLOR[x.cat] ? x.cat : 'Other';
+const TAX_COLOR = '#5d6b68';
+const dot = c => `<span class="dot" style="background:${c}"></span>`;
+function breakdown(parts, base) {                 // coloured bar + legend, percentages of `base`
+  const ps = parts.filter(p => p.v > 0.005);
+  if (!ps.length || !(base > 0)) return '';
+  return `<div class="stack">${ps.map(p => `<i style="width:${p.v / base * 100}%;background:${p.c}"></i>`).join('')}</div>` +
+    ps.map(p => `<div class="leg">${dot(p.c)}<span class="ln">${esc(p.n)}</span><b>${(p.v / base * 100).toFixed(1)}%</b><span class="la">${fmt(p.v)}</span></div>`).join('');
+}
+const catParts = byCat => CATS.map(c => ({n: c.n, c: c.c, v: byCat[c.n] || 0})).sort((a, b) => b.v - a.v);
 function jobGross(j) {                       // gross per month, in the job's currency
   if (j.type === 'hourly') return j.rate * j.hours * WEEKS;
   if (j.type === 'weekly') return j.rate * WEEKS;
@@ -216,7 +246,9 @@ function stats() {
   if (tax === null) { missing = true; tax = 0; }
   const inc = gross - tax;
   const spend = exps.reduce((s, a) => s + a.ms, 0);
-  return {jobs, exps, gross, tax, rate: gross > 0 ? tax / gross * 100 : 0, inc, spend, left: inc - spend, missing, year: saTable().label};
+  const byCat = {};
+  exps.forEach(a => { const c = catOf(a.x); byCat[c] = (byCat[c] || 0) + a.ms; });
+  return {jobs, exps, byCat, gross, tax, rate: gross > 0 ? tax / gross * 100 : 0, inc, spend, left: inc - spend, missing, year: saTable().label};
 }
 
 /* ---------- views ---------- */
@@ -237,6 +269,12 @@ function vHome() {
     <div class="kv" style="margin-top:12px"><span>Left over per year</span><b class="${st.left < 0 ? 'neg' : ''}">${fmt(st.left * 12)}</b></div>
     <div class="kv"><span>Income before tax</span><span>${fmt(st.gross)}</span></div>
     <div class="kv"><span>Tax (SA ${st.year})</span><span>−${fmt(st.tax)}</span></div></section>`;
+  if (st.gross > 0 || st.spend > 0) {
+    const base = st.tax + st.spend + Math.max(st.left, 0);
+    h += `<h3>Where your income goes</h3><section class="card"><div class="mute" style="font-size:.8rem">Share of your income before tax</div>` +
+      breakdown([{n: 'Tax', c: TAX_COLOR, v: st.tax}, ...catParts(st.byCat), {n: 'Left over', c: '#e8efed', v: Math.max(st.left, 0)}], base) +
+      (st.left < 0 ? `<div class="warn" style="margin-bottom:0">Your expenses are more than your income after tax.</div>` : '') + `</section>`;
+  }
   h += `<h3>Income</h3>`;
   if (!st.jobs.length) h += `<div class="empty">No income yet.<br><button class="btn pri sm" style="margin-top:10px" data-a="addJob">+ Add a job</button></div>`;
   else h += `<section class="card" style="padding:4px 16px">` + st.jobs.map(a =>
@@ -245,7 +283,7 @@ function vHome() {
   h += `<h3>Expenses</h3>`;
   if (!st.exps.length) h += `<div class="empty">No expenses yet.<br><button class="btn pri sm" style="margin-top:10px" data-a="addExp">+ Add an expense</button></div>`;
   else h += `<section class="card" style="padding:4px 16px">` + st.exps.map(a =>
-    `<button class="row" data-a="editExp" data-id="${a.x.id}"><div class="l"><b>${esc(a.x.name)}</b></div><div class="r neg">${fmt(a.ms)}</div></button>`).join('') + `</section>`;
+    `<button class="row" data-a="editExp" data-id="${a.x.id}"><div class="l"><b>${dot(CAT_COLOR[catOf(a.x)])}${esc(a.x.name)}</b></div><div class="r neg">${fmt(a.ms)}</div></button>`).join('') + `</section>`;
   return h;
 }
 
@@ -278,11 +316,14 @@ function vExpenses() {
   h += `<section class="card hero"><div class="lbl">Expenses per month · ${esc(S.spendCur)}</div><div class="big neg">${fmt(st.spend)}</div>
     <div class="kv"><span>Per year</span><span class="neg">${fmt(st.spend * 12)}</span></div></section>`;
   if (!st.exps.length) h += `<div class="empty">No expenses yet. Add rent, food, subscriptions…</div>`;
-  else h += `<section class="card" style="padding:4px 16px">` + [...st.exps].sort((a, b) => b.ms - a.ms).map(a => {
+  else {
+    h += `<h3>By category</h3><section class="card"><div class="mute" style="font-size:.8rem">Share of your expenses</div>${breakdown(catParts(st.byCat), st.spend)}</section><h3>All expenses</h3>`;
+    h += `<section class="card" style="padding:4px 16px">` + [...st.exps].sort((a, b) => b.ms - a.ms).map(a => {
     const x = a.x, orig = x.cur !== S.spendCur || x.freq !== 'monthly';
-    return `<button class="row" data-a="editExp" data-id="${x.id}"><div class="l"><b>${esc(x.name)}</b>${orig ? `<small>${fmt(x.amt, x.cur)} / ${FREQ_LABEL[x.freq]}</small>` : ''}</div>
+    return `<button class="row" data-a="editExp" data-id="${x.id}"><div class="l"><b>${dot(CAT_COLOR[catOf(x)])}${esc(x.name)}</b><small>${esc(catOf(x))}${orig ? ` · ${fmt(x.amt, x.cur)} / ${FREQ_LABEL[x.freq]}` : ''}</small></div>
       <div class="r neg">${fmt(a.ms)}<small>/ month</small></div></button>`;
-  }).join('') + `</section>`;
+    }).join('') + `</section>`;
+  }
   return h + `<button class="btn pri block" data-a="addExp">+ Add expense</button>`;
 }
 
@@ -344,12 +385,13 @@ function jobSheet(j) {
 
 function expSheet(x) {
   const isNew = !x;
-  x = x || {name: '', amt: '', cur: S.spendCur, freq: 'monthly'};
+  x = x || {name: '', amt: '', cur: S.spendCur, freq: 'monthly', cat: 'Other'};
   openSheet(`<h2>${isNew ? 'Add expense' : 'Edit expense'}</h2>
     <form id="expf" data-id="${esc(x.id || '')}">
     <label>Name<input name="name" required maxlength="40" value="${esc(x.name)}" placeholder="e.g. Rent"></label>
     <div class="inl"><label>Amount<input name="amt" type="number" inputmode="decimal" step="any" min="0" required value="${esc(x.amt)}"></label>
     <label>Currency<select name="cur">${curOpts(x.cur)}</select></label></div>
+    <label>Category<select name="cat">${CATS.map(c => `<option ${c.n === catOf(x) ? 'selected' : ''}>${c.n}</option>`).join('')}</select></label>
     <label>How often<select name="freq">${Object.keys(FREQ).map(f => `<option value="${f}" ${f === x.freq ? 'selected' : ''}>Every ${FREQ_LABEL[f]}</option>`).join('')}</select></label>
     <div class="actions"><button class="btn pri" style="flex:1">Save</button><button type="button" class="btn" data-a="close">Cancel</button>${isNew ? '' : delBtn('delExp', x.id)}</div></form>`);
 }
@@ -394,7 +436,7 @@ document.addEventListener('submit', e => {
   } else if (f.id === 'expf') {
     const amt = num(fd.amt);
     if (!(amt > 0)) return toast('Enter an amount above 0');
-    put(S.expenses, {id: f.dataset.id || uid(), name: fd.name.trim(), amt, cur: fd.cur, freq: fd.freq});
+    put(S.expenses, {id: f.dataset.id || uid(), name: fd.name.trim(), amt, cur: fd.cur, freq: fd.freq, cat: fd.cat});
     save(); closeSheet(); render();
   }
 });
