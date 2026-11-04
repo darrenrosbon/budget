@@ -117,7 +117,7 @@ const DEF = () => ({spendCur: 'ZAR', age: 0, rates: null, lastBackup: null, crea
 function load() { try { return Object.assign(DEF(), JSON.parse(localStorage.getItem(KEY)) || {}); } catch { return DEF(); } }
 function save() { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch { toast('Could not save – storage is full or blocked'); } }
 /* Mock data: only ever loaded when the page is served from localhost, never on the live site. */
-const IS_LOCAL = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
+const IS_LOCAL = location.protocol === 'file:' || ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
 const mockData = () => Object.assign(DEF(), {
   jobs: [
     {id: 'mock-job1', name: 'Freelance', cur: 'USD', type: 'hourly', rate: 25, hours: 30},
@@ -135,10 +135,7 @@ const mockData = () => Object.assign(DEF(), {
   ]
 });
 let S = load();
-if (IS_LOCAL && !localStorage.getItem('budget-mock-seeded')) {   // seed once, so "Erase all" still lets you test the empty state
-  localStorage.setItem('budget-mock-seeded', '1');
-  if (!S.jobs.length && !S.expenses.length) { S = mockData(); save(); }
-}
+if (IS_LOCAL && !S.jobs.length && !S.expenses.length) { S = mockData(); save(); }   // preview always shows sample amounts when empty
 let tab = 'home';
 let missing = false;
 
