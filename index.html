@@ -108,7 +108,25 @@ const KEY = 'budget-v2';
 const DEF = () => ({spendCur: 'ZAR', age: 0, rates: null, lastBackup: null, created: Date.now(), jobs: [], expenses: []});
 function load() { try { return Object.assign(DEF(), JSON.parse(localStorage.getItem(KEY)) || {}); } catch { return DEF(); } }
 function save() { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch { toast('Could not save – storage is full or blocked'); } }
+/* Mock data: only ever loaded when the page is served from localhost, never on the live site. */
+const IS_LOCAL = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
+const mockData = () => Object.assign(DEF(), {
+  jobs: [
+    {id: 'mock-job1', name: 'Freelance', cur: 'USD', type: 'hourly', rate: 25, hours: 30},
+    {id: 'mock-job2', name: 'Retainer', cur: 'USD', type: 'monthly', rate: 800, hours: 0}
+  ],
+  expenses: [
+    {id: 'mock-exp1', name: 'Rent', amt: 6000, cur: 'ZAR', freq: 'monthly'},
+    {id: 'mock-exp2', name: 'Groceries', amt: 400, cur: 'ZAR', freq: 'weekly'},
+    {id: 'mock-exp3', name: 'Netflix', amt: 10, cur: 'USD', freq: 'monthly'},
+    {id: 'mock-exp4', name: 'Car insurance', amt: 14400, cur: 'ZAR', freq: 'yearly'}
+  ]
+});
 let S = load();
+if (IS_LOCAL && !localStorage.getItem('budget-mock-seeded')) {   // seed once, so "Erase all" still lets you test the empty state
+  localStorage.setItem('budget-mock-seeded', '1');
+  if (!S.jobs.length && !S.expenses.length) { S = mockData(); save(); }
+}
 let tab = 'home';
 let missing = false;
 
@@ -287,7 +305,7 @@ function vSettings() {
     <button class="btn block" data-a="rates">Refresh rates now</button></section>
     <h3>Your data</h3><section class="card">
     <p class="mute" style="font-size:.85rem;margin-top:0">Everything is stored only in this browser on this device. Last backup: ${S.lastBackup ? new Date(S.lastBackup).toLocaleDateString() : 'never'}.</p>
-    <div class="actions" style="margin-top:0"><button class="btn" data-a="export">Export backup</button><button class="btn" data-a="import">Import backup</button><button class="btn danger" data-a="erase">Erase all</button></div>
+    <div class="actions" style="margin-top:0"><button class="btn" data-a="export">Export backup</button><button class="btn" data-a="import">Import backup</button><button class="btn danger" data-a="erase">Erase all</button>${IS_LOCAL ? '<button class="btn" data-a="mock">Load test data</button>' : ''}</div>
     <input type="file" id="file" accept="application/json,.json" hidden></section>`;
 }
 
@@ -356,6 +374,7 @@ const A = {
   rates: () => refreshRates(true),
   export: () => { download(`budget-backup-${todayStr()}.json`, JSON.stringify(S, null, 2)); S.lastBackup = Date.now(); save(); render(); },
   import: () => $('#file').click(),
+  mock: () => { if (IS_LOCAL && confirm('Replace your data with test data?')) { const rates = S.rates; S = mockData(); S.rates = rates; save(); render(); toast('Test data loaded'); } },
   erase: () => { if (confirm('Erase ALL data on this device? This cannot be undone.') && confirm('Really erase everything?')) { const rates = S.rates; S = DEF(); S.rates = rates; save(); render(); } }
 };
 document.addEventListener('click', e => {
