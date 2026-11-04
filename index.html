@@ -365,6 +365,7 @@ function vTax() {
   const med = medCredit(+S.med || 0) * 12;
   const p = saParts(taxable, age, med);
   const R = n => fmt(n, 'ZAR').replace(/[.,]00$/, '');      // drop ".00" on round amounts
+  const Rm = n => R(Math.round(n));                          // monthly figures, whole rand
   const has = st.annualZ > 0;
   const rebateTxt = age >= 75 ? 'primary, secondary and tertiary' : age >= 65 ? 'primary and secondary' : 'primary';
   let h = st.missing ? RATE_WARN : '';
@@ -391,8 +392,10 @@ function vTax() {
     h += `<div class="brk ${here ? 'here' : ''}"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
       <b>${R(lo)}${hi ? ' – ' + R(hi) : ' and above'}</b>
       <span style="white-space:nowrap">${here ? `<span class="badge" style="background:var(--acc);color:var(--acc-ink)">You are here</span>` : ''}<span class="badge" style="background:${col};color:#111">${+(b[2] * 100).toFixed(0)}%</span></span></div>
-      <div class="bar" style="margin:8px 0 4px"><i style="width:${fill}%;background:${col}"></i></div>
-      <div class="mute" style="font-size:.82rem">${inB > 0 ? `Your income in this bracket: ${R(inB)} · tax ${R(inB * b[2])}` : 'None of your income falls here'}</div></div>`;
+      <div class="mute" style="font-size:.82rem">a year · ${Rm(lo)}${hi ? ' – ' + Rm(hi) : ' and above'} a month</div>
+      <div class="bar" style="margin:8px 0 6px"><i style="width:${fill}%;background:${col}"></i></div>
+      ${inB > 0 ? `<div class="kv" style="font-size:.85rem"><span>Your income here</span><span style="text-align:right">${R(inB)} a year<br>${Rm(inB / 12)} a month</span></div>
+      <div class="kv" style="font-size:.85rem"><span>Tax on it</span><span style="text-align:right">${R(inB * b[2])} a year<br>${Rm(inB * b[2] / 12)} a month</span></div>` :`<div class="mute" style="font-size:.82rem">None of your income falls here</div>`}</div>`;
   });
   h += `</section>`;
   const nxt = t.brackets[p.bi + 1];
