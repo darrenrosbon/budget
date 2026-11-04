@@ -213,17 +213,25 @@ function jobGross(j, ov = {}) {              // gross per month, in the job's cu
 
 /* South African income tax (SARS). Keyed by the year the tax year STARTS (1 March).
    brackets: [taxable income above, base tax, rate]; rebate: [primary, secondary 65+, tertiary 75+]
-   med: monthly medical scheme fees credit [main member, first dependant, each further dependant] */
+   med: monthly medical scheme fees credit [main member, first dependant, each further dependant]
+   raCap: yearly cap on the retirement fund contribution deduction (section 11F; R430,000 from 1 March 2026)
+   Source for 2026/27: SARS Tax Pocket Guide 2026/27 (Budget 2026). */
 const SA_TAX = {
-  2025: {label: '2025/26', rebate: [17235, 9444, 3145], med: [364, 364, 246], brackets: [[0, 0, .18], [237100, 42678, .26], [370500, 77362, .31], [512800, 121475, .36], [673000, 179147, .39], [857900, 251258, .41], [1817000, 644489, .45]]},
-  2026: {label: '2026/27', rebate: [17820, 9765, 3249], med: [376, 376, 254], brackets: [[0, 0, .18], [245100, 44118, .26], [383100, 79998, .31], [530200, 125599, .36], [695800, 185215, .39], [887000, 259783, .41], [1878600, 666339, .45]]}
+  2025: {label: '2025/26', rebate: [17235, 9444, 3145], med: [364, 364, 246], raCap: 350000, brackets: [[0, 0, .18], [237100, 42678, .26], [370500, 77362, .31], [512800, 121475, .36], [673000, 179147, .39], [857900, 251258, .41], [1817000, 644489, .45]]},
+  2026: {label: '2026/27', rebate: [17820, 9765, 3249], med: [376, 376, 254], raCap: 430000, brackets: [[0, 0, .18], [245100, 44118, .26], [383100, 79998, .31], [530200, 125599, .36], [695800, 185215, .39], [887000, 259783, .41], [1878600, 666339, .45]]}
 };
+const taxYearStart = (date = new Date()) => date.getMonth() >= 2 ? date.getFullYear() : date.getFullYear() - 1;   // tax year runs 1 March – end Feb
 function saTable(date = new Date()) {                       // auto-pick the tax year from today's date
-  const start = date.getMonth() >= 2 ? date.getFullYear() : date.getFullYear() - 1;
+  const start = taxYearStart(date);
   const keys = Object.keys(SA_TAX).map(Number).sort((a, b) => a - b);
   const k = keys.filter(x => x <= start).pop() ?? keys[0];  // newest table we have, if the year is newer
   return SA_TAX[k];
 }
+function staleYear() {                                      // label of the real tax year if we only have older rates
+  const start = taxYearStart();
+  return SA_TAX[start] ? '' : `${start}/${String(start + 1).slice(2)}`;
+}
+const staleWarn = () => staleYear() ? `<div class="warn">It's now the ${staleYear()} tax year, but this app only has SARS ${saTable().label} rates. Tax figures may be slightly off until it's updated.</div>` : '';
 function saParts(taxable, age, medAnnual = 0) {             // yearly tax in ZAR, with each step of the working
   const t = saTable();
   let bi = 0;
@@ -239,7 +247,7 @@ function medCredit(n) {                                      // monthly credit f
   return (n >= 1 ? m[0] : 0) + (n >= 2 ? m[1] : 0) + (n > 2 ? m[2] * (n - 2) : 0);
 }
 const UIF_CAP = 177.12;                                      // 1% of the R17,712 monthly earnings ceiling
-const RA_PCT = 0.275, RA_CAP = 350000;                       // retirement annuity deduction limits
+const RA_PCT = 0.275;                                        // retirement deduction limit: 27.5% of income, up to the yearly cap in SA_TAX
 
 function stats(ov = {}) {
   missing = false;
@@ -257,7 +265,7 @@ function stats(ov = {}) {
   const gross = jobs.reduce((s, a) => s + a.gs, 0);
   const grossZ = jobs.reduce((s, a) => s + a.gz, 0);
   const annual = grossZ * 12;
-  const raDeduct = Math.min((+S.ra || 0) * 12, RA_PCT * annual, RA_CAP);        // tax-deductible part of the RA
+  const raDeduct = Math.min((+S.ra || 0) * 12, RA_PCT * annual, saTable().raCap);        // tax-deductible part of the RA
   const taxZ = saTax(annual - raDeduct, +S.age, medCredit(+S.med || 0) * 12) / 12;   // tax is worked out on ALL jobs combined
   const selfZ = jobs.filter(a => !a.j.payroll).reduce((s, a) => s + a.gz, 0);
   const uifZ = jobs.filter(a => a.j.payroll).reduce((s, a) => s + Math.min(a.gz * 0.01, UIF_CAP), 0);
@@ -315,7 +323,7 @@ function vHome() {
 
 function vIncome() {
   const st = stats();
-  let h = st.missing ? RATE_WARN : '';
+  let h = (st.missing ? RATE_WARN : '') + staleWarn();
   h += `<section class="card hero"><div class="lbl">Income per month after tax · ${esc(S.spendCur)}</div><div class="big">${fmt(st.inc)}</div>
     <div class="kv"><span>Before tax</span><span>${fmt(st.gross)}</span></div>
     <div class="kv"><span>Tax (SA ${st.year})</span><span>−${fmt(st.tax)}</span></div>
@@ -368,7 +376,7 @@ function vTax() {
   const Rm = n => R(Math.round(n));                          // monthly figures, whole rand
   const has = st.annualZ > 0;
   const rebateTxt = age >= 75 ? 'primary, secondary and tertiary' : age >= 65 ? 'primary and secondary' : 'primary';
-  let h = st.missing ? RATE_WARN : '';
+  let h = (st.missing ? RATE_WARN : '') + staleWarn();
   if (!has) h += `<div class="warn">Add a job on the Income tab to see where you fit in the brackets.</div>`;
   h += `<section class="card hero"><div class="lbl">Estimated tax for the year · SA ${t.label} · rand</div><div class="big">${R(p.tax)}</div>
     <div class="kv"><span>Per month</span><b>${R(p.tax / 12)}</b></div>
@@ -400,7 +408,9 @@ function vTax() {
   h += `</section>`;
   const nxt = t.brackets[p.bi + 1];
   if (has && nxt) h += `<p class="mute" style="font-size:.85rem;text-align:center">${R(nxt[0] - taxable)} more taxable income a year would take you into the ${+(nxt[2] * 100).toFixed(0)}% bracket.</p>`;
-  return h + `<p class="mute" style="font-size:.8rem">Yearly amounts in rand, using SARS ${t.label} rates. Based on all your jobs combined, plus the age, retirement annuity and medical aid settings. The bar shows how much of each bracket your income fills. Other deductions aren't included.</p>`;
+  return h + `<p class="mute" style="font-size:.8rem">Yearly amounts in rand, using SARS ${t.label} rates. Based on all your jobs combined, plus the age, retirement annuity and medical aid settings. The bar shows how much of each bracket your income fills.</p>
+    <section class="card"><b>What this doesn't include</b>
+    <p class="mute" style="font-size:.85rem;margin:6px 0 0">South African residents are taxed on their worldwide income. The foreign employment income exemption only applies to employees who work outside South Africa for more than 183 days in a year, so it isn't applied here, and independent contractors don't qualify. Business expenses you can claim as a freelancer, the extra medical expenses credit, and other deductions aren't included either. Treat this as a planning estimate, and check with SARS or a tax practitioner for your actual return.</p></section>`;
 }
 
 function vSettings() {
@@ -410,13 +420,13 @@ function vSettings() {
     <select data-c="spendCur">${curOpts(S.spendCur)}</select></label></form>
     <p class="mute" style="font-size:.85rem;margin:10px 0 0">Job income keeps its own currency and is converted to this one.</p></section>
     <h3>South African tax</h3><section class="card">
-    <form onsubmit="return false"><label>Your age (sets the tax rebate)
+    <form onsubmit="return false"><label>Your age at the end of the tax year, 28 February (sets the rebate)
     <select data-c="age">${[[0, 'Under 65'], [65, '65 to 74'], [75, '75 or older']].map(([v, t]) => `<option value="${v}" ${+S.age === v ? 'selected' : ''}>${t}</option>`).join('')}</select></label></form>
     <form onsubmit="return false"><label>People on your medical aid (gives a monthly tax credit)
     <select data-c="med">${[0, 1, 2, 3, 4, 5, 6, 7].map(n => `<option value="${n}" ${+S.med === n ? 'selected' : ''}>${n === 0 ? 'No medical aid' : n === 1 ? 'Just me' : 'Me + ' + (n - 1)}</option>`).join('')}</select></label>
     <label>Retirement annuity per month (rand)
     <input type="number" inputmode="decimal" step="any" min="0" data-c="ra" value="${+S.ra || ''}" placeholder="0"></label></form>
-    <p class="mute" style="font-size:.85rem;margin:8px 0 0">An RA lowers your tax (up to 27.5% of income, max R350,000 a year) and counts as money you set aside.</p>
+    <p class="mute" style="font-size:.85rem;margin:8px 0 0">An RA lowers your tax (up to 27.5% of income, max ${fmt(saTable().raCap, 'ZAR').replace(/[.,]00$/, '')} a year) and counts as money you set aside.</p>
     <div class="kv" style="margin-top:10px"><span>Tax year in use</span><span>${saTable().label}</span></div>
     <p class="mute" style="font-size:.85rem;margin:6px 0 0">The tax year is picked automatically from today's date (it changes on 1 March). Your income is converted to rand and taxed on the combined total of all jobs.</p></section>
     <h3>Saving</h3><section class="card">
