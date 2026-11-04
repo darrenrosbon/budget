@@ -215,7 +215,7 @@ function vHome() {
   h += `<section class="card hero"><div class="lbl">Left over each month</div>
     <div class="big ${st.left < 0 ? 'neg' : 'pos'}">${fmt(st.left)}</div>
     <div class="bar ${st.spend > st.inc ? 'over' : ''}"><i style="width:${pct}%"></i></div>
-    <div class="two"><div><span>Income (after tax)</span><b>${fmt(st.inc)}</b></div><div><span>Expenses</span><b>${fmt(st.spend)}</b></div></div>
+    <div class="two"><div><span>Income (after tax)</span><b>${fmt(st.inc)}</b></div><div><span>Expenses</span><b class="neg">${fmt(st.spend)}</b></div></div>
     <div class="kv" style="margin-top:12px"><span>Left over per year</span><b class="${st.left < 0 ? 'neg' : ''}">${fmt(st.left * 12)}</b></div>
     <div class="kv"><span>Income before tax</span><span>${fmt(st.gross)}</span></div>
     <div class="kv"><span>Tax (SA ${st.year})</span><span>−${fmt(st.tax)}</span></div></section>`;
@@ -227,7 +227,7 @@ function vHome() {
   h += `<h3>Expenses</h3>`;
   if (!st.exps.length) h += `<div class="empty">No expenses yet.<br><button class="btn pri sm" style="margin-top:10px" data-a="addExp">+ Add an expense</button></div>`;
   else h += `<section class="card" style="padding:4px 16px">` + st.exps.map(a =>
-    `<button class="row" data-a="editExp" data-id="${a.x.id}"><div class="l"><b>${esc(a.x.name)}</b></div><div class="r">${fmt(a.ms)}</div></button>`).join('') + `</section>`;
+    `<button class="row" data-a="editExp" data-id="${a.x.id}"><div class="l"><b>${esc(a.x.name)}</b></div><div class="r neg">${fmt(a.ms)}</div></button>`).join('') + `</section>`;
   return h;
 }
 
@@ -257,13 +257,13 @@ function vIncome() {
 function vExpenses() {
   const st = stats();
   let h = st.missing ? RATE_WARN : '';
-  h += `<section class="card hero"><div class="lbl">Expenses per month · ${esc(S.spendCur)}</div><div class="big">${fmt(st.spend)}</div>
-    <div class="kv"><span>Per year</span><span>${fmt(st.spend * 12)}</span></div></section>`;
+  h += `<section class="card hero"><div class="lbl">Expenses per month · ${esc(S.spendCur)}</div><div class="big neg">${fmt(st.spend)}</div>
+    <div class="kv"><span>Per year</span><span class="neg">${fmt(st.spend * 12)}</span></div></section>`;
   if (!st.exps.length) h += `<div class="empty">No expenses yet. Add rent, food, subscriptions…</div>`;
   else h += `<section class="card" style="padding:4px 16px">` + [...st.exps].sort((a, b) => b.ms - a.ms).map(a => {
     const x = a.x, orig = x.cur !== S.spendCur || x.freq !== 'monthly';
     return `<button class="row" data-a="editExp" data-id="${x.id}"><div class="l"><b>${esc(x.name)}</b>${orig ? `<small>${fmt(x.amt, x.cur)} / ${FREQ_LABEL[x.freq]}</small>` : ''}</div>
-      <div class="r">${fmt(a.ms)}<small>/ month</small></div></button>`;
+      <div class="r neg">${fmt(a.ms)}<small>/ month</small></div></button>`;
   }).join('') + `</section>`;
   return h + `<button class="btn pri block" data-a="addExp">+ Add expense</button>`;
 }
