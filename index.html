@@ -294,6 +294,16 @@ function stats(ov = {}) {
     inc, spend, left: inc - spend - ra - saved, missing, year: saTable().label};
 }
 
+function taxCutFor(rec) {                         // monthly tax saved by this one expense's work share (spend currency)
+  const keep = S.expenses, others = keep.filter(e => e.id !== rec.id);
+  S.expenses = [...others, {...rec, biz: 0}];
+  const without = stats().bizSave;
+  S.expenses = [...others, rec];
+  const withIt = stats().bizSave;
+  S.expenses = keep;
+  return Math.max(0, withIt - without);
+}
+
 /* ---------- views ---------- */
 const RATE_WARN = `<div class="warn">Some amounts can't be converted yet because exchange rates haven't loaded. Connect to the internet, then open Settings and tap “Refresh rates”.</div>`;
 
@@ -377,14 +387,15 @@ function vExpenses() {
       ${bizS > 0 ? `<div class="kv"><span>Counted as work costs</span><span>${fmt(bizS)} / month</span></div>
       <div class="kv"><span>Estimated tax saved</span><b class="pos">${fmt(st.bizSave)} / month</b></div>
       <div class="kv"><span>Per year</span><span class="pos">${fmt(st.bizSave * 12)}</span></div>`
-      : `<p class="mute" style="font-size:.85rem;margin:6px 0 0">Open an expense and set how much of it is used for work, such as the share of your rent for a home office. The app then estimates the tax you save.</p>`}</section>`;
+      : ''}
+      <p class="mute" style="font-size:.85rem;margin:6px 0 0">Tap an expense below and set how much of it is used for work, such as the share of your rent for a home office. Each one shows the tax cut it gives you.</p></section>`;
   }
   if (!st.exps.length) h += `<div class="empty">No expenses yet. Add rent, food, subscriptions…</div>`;
   else {
     h += `<h3>By category</h3><section class="card"><div class="mute" style="font-size:.8rem">Share of your expenses</div>${breakdown(catParts(st.byCat), st.spend)}</section><h3>All expenses</h3>`;
     h += `<section class="card" style="padding:4px 16px">` + [...st.exps].sort((a, b) => b.ms - a.ms).map(a => {
     const x = a.x, orig = x.cur !== S.spendCur || x.freq !== 'monthly';
-    return `<button class="row" data-a="editExp" data-id="${x.id}"><div class="l"><b>${dot(CAT_COLOR[catOf(x)])}${esc(x.name)}</b><small>${esc(catOf(x))}${orig ? ` · ${fmt(x.amt, x.cur)} / ${FREQ_LABEL[x.freq]}` : ''}${S.contractor && +x.biz > 0 ? ` · ${+x.biz}% work` : ''}</small></div>
+    return `<button class="row" data-a="editExp" data-id="${x.id}"><div class="l"><b>${dot(CAT_COLOR[catOf(x)])}${esc(x.name)}</b><small>${esc(catOf(x))}${orig ? ` · ${fmt(x.amt, x.cur)} / ${FREQ_LABEL[x.freq]}` : ''}${S.contractor ? (+x.biz > 0 ? ` · ${+x.biz}% work · tax cut ${fmt(taxCutFor(x))}/mo` : ' · tap to claim a work share') : ''}</small></div>
       <div class="r neg">${fmt(a.ms)}<small>/ month</small></div></button>`;
     }).join('') + `</section>`;
   }
@@ -531,8 +542,23 @@ function expSheet(x) {
     <label>Category<select name="cat">${CATS.map(c => `<option ${c.n === catOf(x) ? 'selected' : ''}>${c.n}</option>`).join('')}</select></label>
     <label>How often<select name="freq">${Object.keys(FREQ).map(f => `<option value="${f}" ${f === x.freq ? 'selected' : ''}>Every ${FREQ_LABEL[f]}</option>`).join('')}</select></label>
     ${S.contractor ? `<label>Share used for work, tax-deductible (%)<input name="biz" type="number" inputmode="decimal" step="any" min="0" max="100" value="${+x.biz || ''}" placeholder="0"></label>
+    <section class="card" id="taxcut" style="margin:10px 0 0"></section>
     <p class="mute" style="font-size:.8rem;margin:6px 0 0">Use 100 for things only used for work. For a home office, use the room's share of your home's floor area (for rent, electricity and rates). Only claim what you can prove.</p>` : ''}
     <div class="actions"><button class="btn pri" style="flex:1">Save</button><button type="button" class="btn" data-a="close">Cancel</button>${isNew ? '' : delBtn('delExp', x.id)}</div></form>`);
+  if (S.contractor) {                                    // live "tax cut" preview while you type
+    const f = $('#expf');
+    const upd = () => {
+      const pct = Math.min(100, Math.max(0, num(f.biz.value)));
+      const rec = {id: f.dataset.id || 'new-expense', name: '', amt: num(f.amt.value), cur: f.cur.value, freq: f.freq.value, cat: f.cat.value, biz: pct};
+      const cut = pct > 0 && rec.amt > 0 ? taxCutFor(rec) : 0;
+      $('#taxcut').innerHTML = pct > 0 && rec.amt > 0
+        ? `<div class="mute" style="font-size:.85rem">Tax cut from this expense</div><div class="big pos" style="font-size:1.5rem;margin:2px 0 4px">${fmt(cut)} <span class="mute" style="font-size:.9rem;font-weight:400">a month</span></div><div class="kv"><span>Per year</span><span>${fmt(cut * 12)}</span></div>`
+        : `<div class="mute" style="font-size:.9rem">Enter an amount and a work share to see the tax cut.</div>`;
+    };
+    f.addEventListener('input', upd);
+    f.addEventListener('change', upd);
+    upd();
+  }
 }
 
 const readWhat = () => Object.fromEntries([...document.querySelectorAll('[data-wi]')].map(i => [i.dataset.wi, num(i.value)]));
