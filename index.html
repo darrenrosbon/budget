@@ -187,6 +187,9 @@ async function refreshRates(force) {
 const WEEKS = 52 / 12;
 const FREQ = {weekly: WEEKS, monthly: 1, yearly: 1 / 12};
 const FREQ_LABEL = {weekly: 'week', monthly: 'month', yearly: 'year'};
+/* How a job's tax is handled: 'self' = you pay it (freelance / foreign employer), 'payroll' = SA payroll deducts it (pay entered before tax),
+   'net' = already taken off, you enter take-home pay and the app calculates no tax for it. Older jobs only have the `payroll` flag. */
+const modeOf = j => j.mode || (j.payroll ? 'payroll' : 'self');
 
 /* Expense categories and their colours */
 const CATS = [
@@ -262,21 +265,23 @@ function stats(ov = {}) {
     const m = x.amt * FREQ[x.freq];
     return {x, m, ms: toSpend(m, x.cur)};
   });
-  const gross = jobs.reduce((s, a) => s + a.gs, 0);
-  const grossZ = jobs.reduce((s, a) => s + a.gz, 0);
+  const taxed = jobs.filter(a => modeOf(a.j) !== 'net');     // jobs whose pay is entered BEFORE tax
+  const gross = taxed.reduce((s, a) => s + a.gs, 0);
+  const netIn = jobs.filter(a => modeOf(a.j) === 'net').reduce((s, a) => s + a.gs, 0);   // take-home pay: tax already taken off, so no tax is calculated
+  const grossZ = taxed.reduce((s, a) => s + a.gz, 0);
   const annual = grossZ * 12;
   const raDeduct = Math.min((+S.ra || 0) * 12, RA_PCT * annual, saTable().raCap);        // tax-deductible part of the RA
   const taxZ = saTax(annual - raDeduct, +S.age, medCredit(+S.med || 0) * 12) / 12;   // tax is worked out on ALL jobs combined
-  const selfZ = jobs.filter(a => !a.j.payroll).reduce((s, a) => s + a.gz, 0);
-  const uifZ = jobs.filter(a => a.j.payroll).reduce((s, a) => s + Math.min(a.gz * 0.01, UIF_CAP), 0);
+  const selfZ = taxed.filter(a => modeOf(a.j) === 'self').reduce((s, a) => s + a.gz, 0);
+  const uifZ = taxed.filter(a => modeOf(a.j) === 'payroll').reduce((s, a) => s + Math.min(a.gz * 0.01, UIF_CAP), 0);
   const tax = zs(taxZ), uif = zs(uifZ), ra = zs(+S.ra || 0);
   const taxSelf = grossZ > 0 ? tax * selfZ / grossZ : 0;     // share of the tax nobody deducts for you
   const saved = +S.save || 0;
-  const inc = gross - tax - uif;
+  const inc = gross - tax - uif + netIn;
   const spend = exps.reduce((s, a) => s + a.ms, 0);
   const byCat = {};
   exps.forEach(a => { const c = catOf(a.x); byCat[c] = (byCat[c] || 0) + a.ms; });
-  return {jobs, exps, byCat, gross, tax, uif, ra, saved, taxSelf, annualZ: annual, raDeductZ: raDeduct, rate: gross > 0 ? tax / gross * 100 : 0,
+  return {jobs, exps, byCat, gross, netIn, tax, uif, ra, saved, taxSelf, annualZ: annual, raDeductZ: raDeduct, rate: gross > 0 ? tax / gross * 100 : 0,
     inc, spend, left: inc - spend - ra - saved, missing, year: saTable().label};
 }
 
@@ -297,14 +302,15 @@ function vHome() {
     <div class="bar ${out > st.inc ? 'over' : ''}"><i style="width:${pct}%"></i></div>
     <div class="two"><div><span>Income (after tax)</span><b>${fmt(st.inc)}</b></div><div><span>Expenses</span><b class="neg">${fmt(st.spend)}</b></div></div>
     <div class="kv" style="margin-top:12px"><span>Left over per year</span><b class="${st.left < 0 ? 'neg' : ''}">${fmt(st.left * 12)}</b></div>
-    <div class="kv"><span>Income before tax</span><span>${fmt(st.gross)}</span></div>
-    <div class="kv"><span>Tax (SA ${st.year})</span><span>−${fmt(st.tax)}</span></div>
+    ${st.gross > 0 ? `<div class="kv"><span>Income before tax</span><span>${fmt(st.gross)}</span></div>
+    <div class="kv"><span>Tax (SA ${st.year})</span><span>−${fmt(st.tax)}</span></div>` : ''}
+    ${st.netIn > 0 ? `<div class="kv"><span>Take-home pay (already taxed)</span><span>${fmt(st.netIn)}</span></div>` : ''}
     ${st.uif > 0 ? `<div class="kv"><span>UIF</span><span>−${fmt(st.uif)}</span></div>` : ''}
     ${st.ra > 0 ? `<div class="kv"><span>Retirement annuity</span><span>−${fmt(st.ra)}</span></div>` : ''}
     ${st.saved > 0 ? `<div class="kv"><span>Savings goal</span><span>−${fmt(st.saved)}</span></div>` : ''}</section>`;
-  if (st.gross > 0 || out > 0) {
+  if (st.gross > 0 || st.netIn > 0 || out > 0) {
     const base = st.tax + st.uif + out + Math.max(st.left, 0);
-    h += `<h3>Where your income goes</h3><section class="card"><div class="mute" style="font-size:.8rem">Share of your income before tax</div>` +
+    h += `<h3>Where your income goes</h3><section class="card"><div class="mute" style="font-size:.8rem">${st.netIn > 0 ? 'Share of your income' : 'Share of your income before tax'}</div>` +
       breakdown([{n: 'Tax', c: TAX_COLOR, v: st.tax}, {n: 'UIF', c: '#8a94a6', v: st.uif}, {n: 'Retirement (RA)', c: '#6c7ae0', v: st.ra},
         {n: 'Savings goal', c: '#e8c07a', v: st.saved}, ...catParts(st.byCat), {n: 'Left over', c: '#e8efed', v: Math.max(st.left, 0)}], base) +
       (st.left < 0 ? `<div class="warn" style="margin-bottom:0">Your expenses, retirement and savings are more than your income after tax.</div>` : '') + `</section>`;
@@ -312,7 +318,7 @@ function vHome() {
   h += `<h3>Income</h3>`;
   if (!st.jobs.length) h += `<div class="empty">No income yet.<br><button class="btn pri sm" style="margin-top:10px" data-a="addJob">+ Add a job</button></div>`;
   else h += `<section class="card" style="padding:4px 16px">` + st.jobs.map(a =>
-    `<button class="row" data-a="editJob" data-id="${a.j.id}"><div class="l"><b>${esc(a.j.name)}</b><small>before tax</small></div>
+    `<button class="row" data-a="editJob" data-id="${a.j.id}"><div class="l"><b>${esc(a.j.name)}</b><small>${modeOf(a.j) === 'net' ? 'after tax' : 'before tax'}</small></div>
      <div class="r pos">${fmt(a.gs)}${a.j.cur !== S.spendCur ? `<small>${fmt(a.g, a.j.cur)}</small>` : ''}</div></button>`).join('') + `</section>`;
   h += `<h3>Expenses</h3>`;
   if (!st.exps.length) h += `<div class="empty">No expenses yet.<br><button class="btn pri sm" style="margin-top:10px" data-a="addExp">+ Add an expense</button></div>`;
@@ -325,10 +331,11 @@ function vIncome() {
   const st = stats();
   let h = (st.missing ? RATE_WARN : '') + staleWarn();
   h += `<section class="card hero"><div class="lbl">Income per month after tax · ${esc(S.spendCur)}</div><div class="big">${fmt(st.inc)}</div>
-    <div class="kv"><span>Before tax</span><span>${fmt(st.gross)}</span></div>
-    <div class="kv"><span>Tax (SA ${st.year})</span><span>−${fmt(st.tax)}</span></div>
+    ${st.gross > 0 ? `<div class="kv"><span>Before tax</span><span>${fmt(st.gross)}</span></div>
+    <div class="kv"><span>Tax (SA ${st.year})</span><span>−${fmt(st.tax)}</span></div>` : ''}
+    ${st.netIn > 0 ? `<div class="kv"><span>Take-home pay (already taxed)</span><span>${fmt(st.netIn)}</span></div>` : ''}
     ${st.uif > 0 ? `<div class="kv"><span>UIF</span><span>−${fmt(st.uif)}</span></div>` : ''}
-    <div class="kv"><span>Average tax rate</span><span>${st.rate.toFixed(1)}%</span></div></section>`;
+    ${st.gross > 0 ? `<div class="kv"><span>Average tax rate</span><span>${st.rate.toFixed(1)}%</span></div>` : ''}</section>`;
   if (st.taxSelf > 0) h += `<section class="card"><b>Set aside for SARS: ${fmt(st.taxSelf)} a month</b>
     <p class="mute" style="font-size:.85rem;margin:6px 0 0">Nobody deducts tax from jobs that aren't on a South African payroll, so you pay it yourself as provisional tax (due at the end of August and the end of February). If you earn freelance or foreign income, make sure you're registered as a provisional taxpayer with SARS.</p></section>`;
   if (!S.jobs.length) h += `<div class="empty">No jobs yet. Add one to count its income.</div>`;
@@ -336,7 +343,7 @@ function vIncome() {
     const rateTxt = j.type === 'hourly' ? `${fmt(j.rate, j.cur)} / hour × ${+j.hours} hours / week` : `${fmt(j.rate, j.cur)} / ${j.type === 'weekly' ? 'week' : 'month'}`;
     h += `<section class="card"><div style="display:flex;justify-content:space-between;align-items:baseline"><b style="font-size:1.1rem">${esc(j.name)}</b><span class="badge">${j.type}</span></div>
       <div class="mute" style="font-size:.9rem;margin-bottom:8px">${rateTxt} · ${esc(j.cur)}</div>
-      <div class="kv"><span>Per month before tax</span><b>${fmt(g, j.cur)}</b></div>
+      <div class="kv"><span>${modeOf(j) === 'net' ? 'Per month take-home (after tax)' : 'Per month before tax'}</span><b>${fmt(g, j.cur)}</b></div>
       ${j.cur !== S.spendCur ? `<div class="kv"><span>In ${esc(S.spendCur)}</span><b class="pos">${fmt(gs)}</b></div>` : ''}
       <div class="actions"><button class="btn sm" data-a="editJob" data-id="${j.id}">Edit</button></div></section>`;
   });
@@ -377,7 +384,9 @@ function vTax() {
   const has = st.annualZ > 0;
   const rebateTxt = age >= 75 ? 'primary, secondary and tertiary' : age >= 65 ? 'primary and secondary' : 'primary';
   let h = (st.missing ? RATE_WARN : '') + staleWarn();
-  if (!has) h += `<div class="warn">Add a job on the Income tab to see where you fit in the brackets.</div>`;
+  if (!has) h += S.jobs.length && S.jobs.every(j => modeOf(j) === 'net')
+    ? `<div class="warn">Tax is switched off: all your jobs are set to “already taken off”, so there's nothing to calculate. Change a job's tax setting on the Income tab to see the brackets.</div>`
+    : `<div class="warn">Add a job on the Income tab to see where you fit in the brackets.</div>`;
   h += `<section class="card hero"><div class="lbl">Estimated tax for the year · SA ${t.label} · rand</div><div class="big">${R(p.tax)}</div>
     <div class="kv"><span>Per month</span><b>${R(p.tax / 12)}</b></div>
     <div class="kv"><span>Average tax rate</span><span>${has ? (p.tax / st.annualZ * 100).toFixed(1) : '0.0'}%</span></div>
@@ -466,22 +475,27 @@ const delBtn = (a, id) => `<button type="button" class="btn danger" data-a="${a}
 
 function jobSheet(j) {
   const isNew = !j;
-  j = j || {name: '', cur: 'USD', type: 'hourly', rate: '', hours: '', payroll: false};
-  const lbl = {hourly: 'Hourly rate (before tax)', weekly: 'Pay per week (before tax)', monthly: 'Pay per month (before tax)'};
+  j = j || {name: '', cur: 'USD', type: 'hourly', rate: '', hours: '', mode: 'self'};
+  const base = {hourly: 'Hourly rate', weekly: 'Pay per week', monthly: 'Pay per month'};
+  const lblFor = (type, mode) => `${base[type]} (${mode === 'net' ? 'take-home, after tax' : 'before tax'})`;
   openSheet(`<h2>${isNew ? 'Add job' : 'Edit job'}</h2>
     <form id="jobf" data-id="${esc(j.id || '')}">
     <label>Job name<input name="name" required maxlength="40" value="${esc(j.name)}"></label>
     <div class="inl"><label>Paid<select name="type" id="jtype">${['hourly', 'weekly', 'monthly'].map(t => `<option value="${t}" ${t === j.type ? 'selected' : ''}>${t[0].toUpperCase() + t.slice(1)}</option>`).join('')}</select></label>
     <label>Currency<select name="cur">${curOpts(j.cur)}</select></label></div>
-    <label><span id="jlabel">${lbl[j.type]}</span><input name="rate" type="number" inputmode="decimal" step="any" min="0" required value="${esc(j.rate)}"></label>
+    <label><span id="jlabel">${lblFor(j.type, modeOf(j))}</span><input name="rate" type="number" inputmode="decimal" step="any" min="0" required value="${esc(j.rate)}"></label>
     <label id="hrow" ${j.type === 'hourly' ? '' : 'hidden'}>Hours per week<input name="hours" type="number" inputmode="decimal" step="any" min="0" max="168" value="${esc(j.hours)}"></label>
-    <label>Who pays the tax?<select name="payroll"><option value="0" ${j.payroll ? '' : 'selected'}>Me (freelance or foreign employer)</option>
-    <option value="1" ${j.payroll ? 'selected' : ''}>A South African payroll (tax and UIF deducted)</option></select></label>
+    <label>Tax on this pay<select name="mode" id="jmode">
+    <option value="self" ${modeOf(j) === 'self' ? 'selected' : ''}>I pay it myself (freelance or foreign employer)</option>
+    <option value="payroll" ${modeOf(j) === 'payroll' ? 'selected' : ''}>SA payroll deducts it (pay entered before tax)</option>
+    <option value="net" ${modeOf(j) === 'net' ? 'selected' : ''}>Already taken off (I enter take-home pay, no tax calculated)</option></select></label>
     <div class="actions"><button class="btn pri" style="flex:1">Save</button><button type="button" class="btn" data-a="close">Cancel</button>${isNew ? '' : delBtn('delJob', j.id)}</div></form>`);
-  $('#jtype').addEventListener('change', e => {
-    $('#jlabel').textContent = lbl[e.target.value];
-    $('#hrow').hidden = e.target.value !== 'hourly';
-  });
+  const refresh = () => {
+    $('#jlabel').textContent = lblFor($('#jtype').value, $('#jmode').value);
+    $('#hrow').hidden = $('#jtype').value !== 'hourly';
+  };
+  $('#jtype').addEventListener('change', refresh);
+  $('#jmode').addEventListener('change', refresh);
 }
 
 function expSheet(x) {
@@ -554,7 +568,7 @@ document.addEventListener('submit', e => {
   const put = (list, rec) => { const i = list.findIndex(r => r.id === rec.id); if (i >= 0) list[i] = rec; else list.push(rec); };
   if (f.id === 'jobf') {
     const rec = {id: f.dataset.id || uid(), name: fd.name.trim(), cur: fd.cur, type: fd.type, rate: num(fd.rate),
-      hours: fd.type === 'hourly' ? num(fd.hours) : 0, payroll: fd.payroll === '1'};
+      hours: fd.type === 'hourly' ? num(fd.hours) : 0, mode: fd.mode};
     if (rec.type === 'hourly' && !(rec.hours > 0)) return toast('Enter the hours per week');
     put(S.jobs, rec); save(); closeSheet(); render();
   } else if (f.id === 'expf') {

@@ -1,6 +1,6 @@
 // Offline cache for the app shell. Exchange-rate requests are cross-origin and are never cached here.
 // Bump this name on every release: a changed service worker is what triggers the in-app "new version" banner.
-const CACHE = 'budget-shell-v3';
+const CACHE = 'budget-shell-v4';
 const FILES = ['./', 'index.html', 'manifest.webmanifest', 'icon.svg', 'icon-192.png', 'icon-512.png', 'apple-touch-icon.png'];
 
 self.addEventListener('install', e => {
